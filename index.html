@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Vocal Tone Analyzer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
+  :root {
+    --bg:#15130E; --panel:#211D16; --panel-border:#3A3226; --scope-bg:#0B0A06; --scope-grid:#2C2619;
+    --brass:#C89B3C; --brass-glow:#E8C468; --teal:#4FA8A0; --cream:#EDE6D6; --muted:#8C8474; --warn:#C1633A; --good:#7FA86B;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); }
+  body {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    color: var(--cream);
+    display:flex; justify-content:center;
+    padding: 20px 16px 28px;
+    min-height:100vh;
+  }
+  .wrap { width:100%; max-width:420px; }
+  .eyebrow {
+    font-family:'Oswald', sans-serif; font-size:12px; letter-spacing:0.22em;
+    color:var(--muted); text-transform:uppercase; margin-bottom:4px;
+  }
+  .panel { background:var(--panel); border:1px solid var(--panel-border); border-radius:6px; padding:20px 18px; }
+  .pitch-display { text-align:center; margin-bottom:10px; }
+  .note-row { display:flex; align-items:baseline; justify-content:center; gap:6px; }
+  .note-name { font-size:56px; font-weight:700; color:var(--cream); line-height:1; }
+  .note-octave { font-size:22px; color:var(--muted); }
+  .freq-readout { font-size:13px; color:var(--muted); margin-top:4px; }
+
+  .needle-wrap { position:relative; height:26px; margin-bottom:18px; }
+  .needle-base { position:absolute; top:50%; left:0; right:0; height:2px; background:var(--panel-border); transform:translateY(-50%); }
+  .tick { position:absolute; top:50%; width:1px; background:var(--panel-border); transform:translate(-50%,-50%); }
+  .tick.center { height:18px; }
+  .tick.side { height:10px; }
+  .needle {
+    position:absolute; top:50%; width:4px; height:22px; border-radius:2px;
+    transform:translate(-50%,-50%); transition:left 100ms linear, background 150ms, box-shadow 150ms;
+    background:#7FA86B; box-shadow:0 0 8px #7FA86B;
+  }
+  .cents-label { position:absolute; bottom:-2px; left:50%; transform:translateX(-50%); font-size:11px; }
+
+  .meter { margin-bottom:14px; }
+  .meter-head {
+    display:flex; justify-content:space-between; font-family:'Oswald',sans-serif; font-size:12px;
+    letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-bottom:5px;
+  }
+  .meter-head span.val { font-family:'JetBrains Mono',monospace; }
+  .meter-track { height:10px; border-radius:2px; background:#0F0D09; border:1px solid var(--panel-border); overflow:hidden; }
+  .meter-fill { height:100%; width:0%; transition:width 120ms linear; }
+  #brightFill { background:linear-gradient(90deg,#C89B3C66,#C89B3C); box-shadow:0 0 8px #C89B3C99; }
+  #harmFill { background:linear-gradient(90deg,#4FA8A066,#4FA8A0); box-shadow:0 0 8px #4FA8A099; }
+
+  .section-label {
+    font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:0.12em; color:var(--muted);
+    text-transform:uppercase; margin:16px 0 6px;
+  }
+  canvas#scope { width:100%; height:120px; border-radius:4px; border:1px solid var(--panel-border); display:block; background:var(--scope-bg); }
+
+  .vibrato-row { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-top:8px; }
+  .vibrato-row span.val { color:var(--cream); }
+
+  button#toggleBtn {
+    width:100%; margin-top:20px; padding:12px 0; border-radius:4px; cursor:pointer;
+    font-family:'Oswald',sans-serif; letter-spacing:0.15em; font-size:13px; text-transform:uppercase;
+    border:1px solid var(--brass); background:#241C0F; color:var(--brass-glow);
+  }
+  button#toggleBtn.listening { border-color:var(--warn); background:#2A1913; color:var(--warn); }
+
+  .error-msg { color:var(--warn); font-size:12px; margin-top:10px; display:none; }
+  .footnote { font-size:11px; color:var(--muted); margin-top:14px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Vocal Tone · ライブ解析</div>
+  <div class="panel">
+    <div class="pitch-display">
+      <div class="note-row">
+        <span class="note-name" id="noteName">–</span>
+        <span class="note-octave" id="noteOctave"></span>
+      </div>
+      <div class="freq-readout" id="freqReadout">-- Hz</div>
+    </div>
+
+    <div class="needle-wrap">
+      <div class="needle-base"></div>
+      <div class="tick side" style="left:0%"></div>
+      <div class="tick side" style="left:25%"></div>
+      <div class="tick center" style="left:50%"></div>
+      <div class="tick side" style="left:75%"></div>
+      <div class="tick side" style="left:100%"></div>
+      <div class="needle" id="needle" style="left:50%;"></div>
+      <div class="cents-label" id="centsLabel"></div>
+    </div>
+
+    <div class="meter">
+      <div class="meter-head"><span>明るさ Brightness</span><span class="val" id="brightVal" style="color:var(--brass);">0</span></div>
+      <div class="meter-track"><div class="meter-fill" id="brightFill"></div></div>
+    </div>
+    <div class="meter">
+      <div class="meter-head"><span>倍音構成 Harmonics</span><span class="val" id="harmVal" style="color:var(--teal);">0</span></div>
+      <div class="meter-track"><div class="meter-fill" id="harmFill"></div></div>
+    </div>
+
+    <div class="section-label">Scope · 4秒</div>
+    <canvas id="scope"></canvas>
+
+    <div class="vibrato-row">
+      <span>ビブラート: <span class="val" id="vibRate">–</span></span>
+      <span>振れ幅: <span class="val" id="vibDepth">–</span></span>
+    </div>
+
+    <button id="toggleBtn">▶ 解析を開始</button>
+    <div class="error-msg" id="errorMsg"></div>
+    <div class="footnote">明るさ・倍音構成は相対的な目安値です。マイクや環境で変わるため、同一条件での比較にご利用ください。</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var COLORS = {
+    brass: "#C89B3C", brassGlow: "#E8C468", teal: "#4FA8A0", cream: "#EDE6D6",
+    muted: "#8C8474", warn: "#C1633A", good: "#7FA86B", scopeBg: "#0B0A06", scopeGrid: "#2C2619"
+  };
+  var NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function frequencyToNote(freq) {
+    var midi = 69 + 12 * Math.log2(freq / 440);
+    var rounded = Math.round(midi);
+    var cents = Math.round((midi - rounded) * 100);
+    var name = NOTE_NAMES[((rounded % 12) + 12) % 12];
+    var octave = Math.floor(rounded / 12) - 1;
+    return { name: name, octave: octave, cents: cents };
+  }
+
+  function detectPitch(buffer, sampleRate) {
+    var n = buffer.length;
+    var rms = 0;
+    for (var i = 0; i < n; i++) rms += buffer[i] * buffer[i];
+    rms = Math.sqrt(rms / n);
+    if (rms < 0.008) return -1;
+
+    var minFreq = 70, maxFreq = 1000;
+    var minLag = Math.floor(sampleRate / maxFreq);
+    var maxLag = Math.min(Math.ceil(sampleRate / minFreq), n - 2);
+
+    function corrAt(lag) {
+      var sum = 0;
+      var len = n - lag;
+      for (var i = 0; i < len; i++) sum += buffer[i] * buffer[i + lag];
+      return sum;
+    }
+
+    var bestLag = -1, bestCorr = -Infinity;
+    for (var lag = minLag; lag <= maxLag; lag++) {
+      var c = corrAt(lag);
+      if (c > bestCorr) { bestCorr = c; bestLag = lag; }
+    }
+    if (bestLag < 0) return -1;
+
+    var c0 = corrAt(Math.max(bestLag - 1, 1));
+    var c1 = bestCorr;
+    var c2 = corrAt(bestLag + 1);
+    var denom = c0 + c2 - 2 * c1;
+    var shift = denom !== 0 ? (c0 - c2) / (2 * denom) : 0;
+    var refinedLag = bestLag + shift;
+
+    var freq = sampleRate / refinedLag;
+    if (freq < minFreq || freq > maxFreq) return -1;
+    return freq;
+  }
+
+  function spectralCentroid(freqData, sampleRate, fftSize) {
+    var binHz = sampleRate / fftSize;
+    var num = 0, den = 0;
+    for (var i = 1; i < freqData.length; i++) {
+      var mag = freqData[i];
+      num += mag * i * binHz;
+      den += mag;
+    }
+    return den > 0 ? num / den : 0;
+  }
+
+  function harmonicRatioFn(freqData, f0, sampleRate, fftSize) {
+    if (!f0 || f0 <= 0) return 0;
+    var binHz = sampleRate / fftSize;
+    var maxBin = freqData.length - 1;
+    var harmonicEnergy = 0, totalEnergy = 0;
+    for (var h = 1; h <= 10; h++) {
+      var centerBin = Math.round((f0 * h) / binHz);
+      if (centerBin > maxBin) break;
+      var peak = 0;
+      for (var b = Math.max(0, centerBin - 1); b <= Math.min(maxBin, centerBin + 1); b++) {
+        peak = Math.max(peak, freqData[b]);
+      }
+      harmonicEnergy += peak * peak;
+    }
+    for (var i = 1; i <= maxBin; i++) totalEnergy += freqData[i] * freqData[i];
+    var noiseEnergy = Math.max(totalEnergy - harmonicEnergy, 1);
+    return harmonicEnergy / (harmonicEnergy + noiseEnergy);
+  }
+
+  var noteNameEl = document.getElementById("noteName");
+  var noteOctaveEl = document.getElementById("noteOctave");
+  var freqReadoutEl = document.getElementById("freqReadout");
+  var needleEl = document.getElementById("needle");
+  var centsLabelEl = document.getElementById("centsLabel");
+  var brightValEl = document.getElementById("brightVal");
+  var harmValEl = document.getElementById("harmVal");
+  var brightFillEl = document.getElementById("brightFill");
+  var harmFillEl = document.getElementById("harmFill");
+  var vibRateEl = document.getElementById("vibRate");
+  var vibDepthEl = document.getElementById("vibDepth");
+  var toggleBtn = document.getElementById("toggleBtn");
+  var errorMsgEl = document.getElementById("errorMsg");
+  var canvas = document.getElementById("scope");
+  var ctx = canvas.getContext("2d");
+
+  var isListening = false;
+  var audioCtx = null, analyser = null, stream = null, rafId = null;
+  var timeBuf = null, freqBuf = null;
+  var frameCount = 0;
+  var smooth = { brightness: 0, harmonic: 0 };
+  var history = [];
+  var lastUi = 0;
+  var vibrato = { rate: null, depth: null };
+  var SCOPE_WINDOW_MS = 4000;
+
+  function resizeCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, rect.width * dpr);
+    canvas.height = Math.max(1, rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  function draw() {
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = COLORS.scopeBg;
+    ctx.fillRect(0, 0, w, h);
+
+    function centsToY(c) { return h / 2 - (clamp(c, -50, 50) / 50) * (h / 2 - 6); }
+
+    ctx.strokeStyle = COLORS.scopeGrid;
+    ctx.lineWidth = 1;
+    [-50, -25, 0, 25, 50].forEach(function (c) {
+      var y = centsToY(c);
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    });
+    ctx.strokeStyle = COLORS.brass + "55";
+    var zeroY = centsToY(0);
+    ctx.beginPath(); ctx.moveTo(0, zeroY); ctx.lineTo(w, zeroY); ctx.stroke();
+
+    var now = performance.now();
+    var points = history.filter(function (p) { return now - p.t <= SCOPE_WINDOW_MS; });
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = COLORS.brassGlow;
+    ctx.shadowColor = COLORS.brass;
+    ctx.shadowBlur = 6;
+    var started = false;
+    ctx.beginPath();
+    points.forEach(function (p) {
+      var x = w - ((now - p.t) / SCOPE_WINDOW_MS) * w;
+      if (!p.voiced) { started = false; return; }
+      var y = centsToY(p.cents);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else { ctx.lineTo(x, y); }
+    });
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  function computeVibrato() {
+    var now = performance.now();
+    var windowMs = 1200;
+    var pts = history.filter(function (p) { return p.voiced && now - p.t <= windowMs; });
+    if (pts.length < 12) { vibrato = { rate: null, depth: null }; return; }
+    var mean = pts.reduce(function (s, p) { return s + p.cents; }, 0) / pts.length;
+    var detrended = pts.map(function (p) { return p.cents - mean; });
+    var crossings = 0;
+    for (var i = 1; i < detrended.length; i++) {
+      if (detrended[i - 1] === 0) continue;
+      if (Math.sign(detrended[i]) !== Math.sign(detrended[i - 1])) crossings++;
+    }
+    var durationSec = (pts[pts.length - 1].t - pts[0].t) / 1000;
+    if (durationSec <= 0) return;
+    var rate = crossings / (2 * durationSec);
+    var depth = (Math.max.apply(null, detrended) - Math.min.apply(null, detrended)) / 2;
+    if (rate >= 3 && rate <= 9 && depth >= 5) vibrato = { rate: rate, depth: depth };
+    else vibrato = { rate: null, depth: null };
+  }
+
+  function updateUI(isVoiced, noteInfo, freq, brightness, harmonic) {
+    noteNameEl.textContent = noteInfo.name;
+    noteOctaveEl.textContent = isVoiced ? noteInfo.octave : "";
+    freqReadoutEl.textContent = isVoiced ? freq.toFixed(1) + " Hz" : "-- Hz";
+
+    var cents = clamp(noteInfo.cents, -50, 50);
+    var pct = ((cents + 50) / 100) * 100;
+    needleEl.style.left = pct + "%";
+    var centsColor = Math.abs(noteInfo.cents) <= 8 ? COLORS.good : Math.abs(noteInfo.cents) <= 20 ? COLORS.brass : COLORS.warn;
+    needleEl.style.background = centsColor;
+    needleEl.style.boxShadow = "0 0 8px " + centsColor;
+    centsLabelEl.style.color = centsColor;
+    centsLabelEl.textContent = isVoiced ? ((noteInfo.cents > 0 ? "+" : "") + noteInfo.cents + "¢") : "";
+
+    brightValEl.textContent = Math.round(brightness);
+    harmValEl.textContent = Math.round(harmonic);
+    brightFillEl.style.width = clamp(brightness, 0, 100) + "%";
+    harmFillEl.style.width = clamp(harmonic, 0, 100) + "%";
+
+    vibRateEl.textContent = vibrato.rate ? vibrato.rate.toFixed(1) + " Hz" : "–";
+    vibDepthEl.textContent = vibrato.depth ? "±" + vibrato.depth.toFixed(0) + "¢" : "–";
+
+    toggleBtn.textContent = isListening ? (isVoiced ? "● 解析中 — 停止" : "○ 待機中 — 停止") : "▶ 解析を開始";
+  }
+
+  function tick() {
+    rafId = requestAnimationFrame(tick);
+    frameCount++;
+    if (frameCount % 2 !== 0) return;
+    if (!analyser || !audioCtx) return;
+
+    analyser.getFloatTimeDomainData(timeBuf);
+    analyser.getByteFrequencyData(freqBuf);
+    var sampleRate = audioCtx.sampleRate;
+    var freq = detectPitch(timeBuf, sampleRate);
+    var now = performance.now();
+    var isVoiced = freq > 0;
+
+    var noteInfo = { name: "–", octave: "", cents: 0 };
+    var brightnessRaw = 0, harmonicRaw = 0;
+    if (isVoiced) {
+      noteInfo = frequencyToNote(freq);
+      var centroid = spectralCentroid(freqBuf, sampleRate, analyser.fftSize);
+      brightnessRaw = clamp(((centroid - 300) / (3500 - 300)) * 100, 0, 100);
+      harmonicRaw = harmonicRatioFn(freqBuf, freq, sampleRate, analyser.fftSize) * 100;
+    }
+
+    smooth.brightness = isVoiced ? smooth.brightness * 0.82 + brightnessRaw * 0.18 : smooth.brightness * 0.9;
+    smooth.harmonic = isVoiced ? smooth.harmonic * 0.82 + harmonicRaw * 0.18 : smooth.harmonic * 0.9;
+
+    history.push({ t: now, cents: noteInfo.cents, voiced: isVoiced });
+    var cutoff = now - SCOPE_WINDOW_MS - 500;
+    while (history.length && history[0].t < cutoff) history.shift();
+
+    computeVibrato();
+    draw();
+
+    if (now - lastUi > 90) {
+      lastUi = now;
+      updateUI(isVoiced, noteInfo, freq, smooth.brightness, smooth.harmonic);
+    }
+  }
+
+  function start() {
+    errorMsgEl.style.display = "none";
+    navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    }).then(function (s) {
+      stream = s;
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioCtx();
+      var source = audioCtx.createMediaStreamSource(stream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+
+      timeBuf = new Float32Array(analyser.fftSize);
+      freqBuf = new Uint8Array(analyser.frequencyBinCount);
+      history = [];
+      smooth.brightness = 0; smooth.harmonic = 0;
+
+      resizeCanvas();
+      isListening = true;
+      toggleBtn.classList.add("listening");
+      toggleBtn.textContent = "○ 待機中 — 停止";
+      rafId = requestAnimationFrame(tick);
+    }).catch(function () {
+      errorMsgEl.textContent = "マイクにアクセスできませんでした。ブラウザの権限設定を確認してください。";
+      errorMsgEl.style.display = "block";
+    });
+  }
+
+  function stop() {
+    if (rafId) cancelAnimationFrame(rafId);
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+    if (audioCtx) audioCtx.close();
+    audioCtx = null; analyser = null; stream = null;
+    isListening = false;
+    toggleBtn.classList.remove("listening");
+    toggleBtn.textContent = "▶ 解析を開始";
+    noteNameEl.textContent = "–"; noteOctaveEl.textContent = ""; freqReadoutEl.textContent = "-- Hz";
+    centsLabelEl.textContent = "";
+  }
+
+  toggleBtn.addEventListener("click", function () { isListening ? stop() : start(); });
+  window.addEventListener("beforeunload", stop);
+  resizeCanvas();
+})();
+</script>
+</body>
+</html>
